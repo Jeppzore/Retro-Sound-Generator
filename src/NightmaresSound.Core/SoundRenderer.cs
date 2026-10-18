@@ -19,9 +19,11 @@ public sealed class SoundRenderer
         RecipeValidator.Validate(recipe);
         cancellationToken.ThrowIfCancellationRequested();
         int rate = recipe.SampleRate, channels = recipe.Channels;
-        int frames = (int)Math.Round(recipe.DurationSeconds * rate);
+        int frames = (int)Math.Round((recipe.Instrument is null || recipe.Loop ? recipe.DurationSeconds
+            : Math.Max(recipe.DurationSeconds, InstrumentCatalog.RequiredDuration(recipe.Instrument))) * rate);
         var mix = new double[frames * channels];
-        for (int layerIndex = 0; layerIndex < recipe.Layers.Length; layerIndex++)
+        if (recipe.Instrument is not null) InstrumentRenderer.Mix(mix, recipe, cancellationToken);
+        for (int layerIndex = 0; recipe.Instrument is null && layerIndex < recipe.Layers.Length; layerIndex++)
         {
             var layer = recipe.Layers[layerIndex];
             if (!layer.Enabled || layer.Level == 0) continue;

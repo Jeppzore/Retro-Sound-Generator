@@ -1,8 +1,20 @@
-# Nightmares Sound Generator
+# Retro Sounds Generator 1.1 — Instruments
 
 A local Windows desktop sound generator for the 2D game **Nightmares**, written in C# and WPF on .NET 10. Create stylized retro and textured effects, evolving cues, and procedural ambience loops, then export **signed 16-bit PCM WAV** files.
 
-No samples or finished sounds are included. Starting configurations contain synthesis settings only. The app starts silently and writes no audio files until you choose **Export WAV**. It needs no account or network connection after installation.
+The app starts silently and writes no audio files until you choose **Export WAV**. It needs no account or network connection after installation. Version 1.1 adds seven medieval-inspired instruments, including bundled CC0 acoustic recordings for four voices.
+
+## Medieval instruments
+
+Choose **Instruments · Medieval** in the category list, then select guitar, lute, harp, hammered dulcimer, recorder, fiddle, or frame drum. Every instrument has a distinct **Retro** synthesized voice. Harp, recorder, fiddle, and frame drum also offer **Acoustic** playback using bundled recordings. Guitar, lute, and dulcimer remain Retro-only; other instruments' recordings are never substituted.
+
+Choose **Single note / hit** or **Phrase**. Phrases last two bars in 4/4: ascending/descending arpeggios for plucked strings, strummed chords for guitar/lute, modal melodies for recorder/fiddle, and march/dance rhythms for frame drum. Set key, scale (major, natural minor, Dorian, or Mixolydian), octave 3–5, and tempo 40–200 BPM. Defaults are D Dorian, octave 4, 90 BPM. Single-note mode plays the key's root; pitch and scale controls do not affect drum patterns.
+
+Instrument voices use the common pitch, noise, effects, normalization, output, and WAV controls. Their oscillator layers are replaced by the selected instrument. Duration cannot crop the instrument's release; the waveform/export length includes its tail. Instrument phrase loops repeat exactly two bars, wrapping overlapping releases across the boundary. Preview and export use identical PCM bytes. Randomize varies seed, attack texture, and brightness while preserving musical settings.
+
+Acoustic playback uses the nearest recorded pitch and permits at most four semitones of transposition per sample. Supported sounding ranges, including master pitch and vibrato, are C3–C6 for harp, C4–G♯5 for recorder, and C4–C♯6 for fiddle. The drum permits ±4 semitones of tuning. An out-of-range edit shows a validation message and retains the previous recipe; select Retro for a wider range. The acoustic recorder uses a bass recorder, the harp a folk harp, and the fiddle a bowed solo violin. These are medieval-inspired sounds, not claims of historical reconstruction.
+
+The bank contains 23 processed samples (mono PCM16, up to four seconds each). Original creators, pinned source URLs, source and bundled SHA-256 hashes, mappings, processing notes, and original CC0 licenses are retained in `src/NightmaresSound.Core/Samples`. Samples are embedded for offline and single-file operation. See [third-party notices](THIRD-PARTY-NOTICES.md). To regenerate the bank with Python 3 and network access, run `python scripts/bundle-instruments.py`. A custom sequencer and sample importer are outside this release.
 
 ## Run
 
@@ -17,13 +29,15 @@ In VS Code, install the recommended C# extensions, open this folder, and press *
 
 ## Create a sound
 
-1. Select a category and starting configuration, or search across all 26 configurations.
+1. Select a category and starting configuration, or search across all 33 configurations.
 2. Press **Randomize** for a new variation in that configuration. It keeps the category, loop mode, sample rate, channels, normalization setting, and output level.
 3. Press **Play**, then adjust Duration, Pitch, Brightness, Noise amount, and Output level. Nothing plays automatically. Changing settings stops the previous preview.
 4. Use the expanded layer and effect panels for more control. Sliders have numeric fields beside them; hover for explanations. Numeric fields commit when focus leaves them. Invalid input has a red border and an explanatory tooltip; the previous valid setting remains in use.
 5. Choose **44.1 or 48 kHz**, **mono or stereo**, then **Export WAV**. Bit depth is always 16-bit PCM. The waveform and preview use the same PCM bytes written into the WAV.
 
 **Save recipe** stores the full settings and seed as JSON; **Open recipe** restores them. Undo/redo retains 100 edits during the current session. A slider drag is one edit. Save a recipe before closing to keep a sound you like. The same recipe and seed reproduce the same audio in this version.
+
+Sliders clamp to exact accepted endpoints, including floating-point rounding near a limit. Instrument Duration reserves the release tail; phrase-loop Duration is fixed and its slider is disabled. Acoustic Pitch and Vibrato depth ranges update together to keep every note within the bundled recordings. Typed numeric input is validated without throwing from the binding setter, and accepts decimal points or your Windows locale's decimal separator.
 
 | Category | Starting configurations |
 | --- | --- |
@@ -40,8 +54,9 @@ In VS Code, install the recommended C# extensions, open this folder, and press *
 | Inventory and equipment | Equipment movement; Slot click |
 | UI and menus | Confirmation; Rejection |
 | World interactions | Chest opening; Mineral break |
+| Instruments · Medieval | Guitar; Lute; Harp; Hammered dulcimer; Recorder; Fiddle; Frame drum |
 
-The Nightmares Sound Design Audit inspired these categories. They are stylized procedural interpretations, not realistic voices or environmental recordings.
+The Nightmares Sound Design Audit inspired the original effects categories. Those configurations remain stylized procedural interpretations; the new Instruments category also includes acoustic recordings.
 
 ## Sound controls
 
@@ -90,10 +105,10 @@ The core tests can run independently using `dotnet test tests/NightmaresSound.Te
 
 ## Files and troubleshooting
 
-Recipes use schema version 1 and include the seed, configuration ID, all layer/effect controls, loop mode, and output settings. Invalid or unsupported files are rejected without replacing your current recipe. Saves and exports use a temporary file and replace the destination only after writing succeeds.
+Recipes use schema version 1 and include the seed, configuration ID, all layer/effect controls, loop mode, output settings, and optional instrument/style/phrase settings. Existing recipes without instrument settings retain their previous behavior. Version 1.1 instrument recipes require this release or later. Invalid or unsupported files are rejected without replacing your current recipe. Saves and exports use a temporary file and replace the destination only after writing succeeds.
 
 The last successful export folder is remembered in `%LOCALAPPDATA%/NightmaresSound/settings.json`. This preference is written only after a WAV export. No audio or recipe is saved there automatically.
 
 If playback fails because an output device is missing or disconnected, the app displays an error and keeps **WAV export** available. Restore/select your Windows output device and press Play to retry. Shared-mode playback may be converted to the device's mix format by Windows; the exported WAV keeps your chosen rate and channels. If a file cannot be written, select a writable folder or close the program locking that file.
 
-This version intentionally exports one sound at a time. It does not import samples, generate music arrangements, batch-export variations, or modify the game project.
+This version intentionally exports one sound or preset phrase at a time. It does not import samples, create full music arrangements, batch-export variations, or modify the game project.

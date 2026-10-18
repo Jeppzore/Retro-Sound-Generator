@@ -31,6 +31,54 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<NumberParameter> SimpleParameters { get; }
     public IReadOnlyList<ParameterGroup> EffectGroups { get; }
     public IReadOnlyList<LayerEditorViewModel> Layers { get; }
+    public NumberParameter InstrumentTempoParameter { get; }
+    public IReadOnlyList<InstrumentDefinition> Instruments => InstrumentCatalog.All;
+    public bool IsInstrument => Current.Instrument is not null;
+    public bool IsSynthesis => !IsInstrument;
+    public bool IsPitchedInstrument => IsInstrument && !SelectedInstrument.IsDrum;
+    public bool IsInstrumentPhrase => Current.Instrument?.Mode == InstrumentMode.Phrase;
+    public InstrumentDefinition SelectedInstrument
+    {
+        get => InstrumentCatalog.Get(Current.Instrument?.Id ?? "guitar");
+        set
+        {
+            if (value is null || value.Id == Current.Instrument?.Id) return;
+            EndGesture();
+            var next = SoundCatalog.Create("instrument-" + value.Id);
+            Apply(next with { SampleRate = SampleRate, Channels = Channels, Normalize = Normalize, OutputDb = Current.OutputDb });
+        }
+    }
+    public InstrumentStyle[] InstrumentStyles => SelectedInstrument.Styles;
+    public InstrumentMode[] InstrumentModes { get; } = Enum.GetValues<InstrumentMode>();
+    public MusicalScale[] MusicalScales { get; } = Enum.GetValues<MusicalScale>();
+    public InstrumentPhrase[] InstrumentPhrases => SelectedInstrument.Phrases;
+    public string[] MusicalKeys => InstrumentCatalog.Keys;
+    public int[] InstrumentOctaves { get; } = [3, 4, 5];
+    public InstrumentStyle InstrumentStyle { get => Current.Instrument?.Style ?? InstrumentStyle.Retro; set => ChangeInstrument(s => s with { Style = value }); }
+    public InstrumentMode InstrumentMode { get => Current.Instrument?.Mode ?? InstrumentMode.SingleNote; set => ChangeInstrument(s => s with { Mode = value }); }
+    public InstrumentPhrase InstrumentPhrase { get => Current.Instrument?.Phrase ?? InstrumentPhrase.Ascending; set => ChangeInstrument(s => s with { Phrase = value }); }
+    public MusicalScale InstrumentScale { get => Current.Instrument?.Scale ?? MusicalScale.Dorian; set => ChangeInstrument(s => s with { Scale = value }); }
+    public int InstrumentKey { get => Current.Instrument?.Key ?? 2; set { if (value >= 0) ChangeInstrument(s => s with { Key = value }); } }
+    public int InstrumentOctave { get => Current.Instrument?.Octave ?? 4; set { if (value > 0) ChangeInstrument(s => s with { Octave = value }); } }
+    public int InstrumentTempo { get => Current.Instrument?.Tempo ?? 90; set => ChangeInstrument(s => s with { Tempo = value }); }
+    public string InstrumentHelp => SelectedInstrument.Id switch
+    {
+        "harp" => "Retro synthesis or acoustic folk harp. Acoustic range: C3–C6, including master pitch and vibrato. Single note plays the key's root.",
+        "recorder" => "Retro synthesis or acoustic bass recorder. Acoustic range: C4–G♯5, including master pitch and vibrato. Use octave 4 for phrases in C–G♯.",
+        "fiddle" => "Retro synthesis or acoustic solo violin. Acoustic range: C4–C♯6, including master pitch and vibrato. Use octave 4 for phrases in every key.",
+        "frame-drum" => "Retro synthesis or an acoustic frame drum. Choose a single hit or a two-bar rhythm. The acoustic hit permits ±4 semitones of tuning.",
+        _ => "Retro synthesis. No suitable CC0 sample bank is bundled for this instrument. Single note plays the key's root."
+    };
+    private void ChangeInstrument(Func<InstrumentSettings, InstrumentSettings> change)
+    {
+        if (Current.Instrument is null) return;
+        var settings = change(Current.Instrument);
+        if (settings == Current.Instrument) return;
+        EndGesture();
+        var next = Current with { Instrument = settings, DurationSeconds = InstrumentCatalog.RequiredDuration(settings) };
+        try { Apply(next); }
+        catch (InvalidDataException ex) { throw new ArgumentException(ex.Message, ex); }
+    }
     public int[] SampleRates { get; } = [44100, 48000];
     public int[] ChannelCounts { get; } = [1, 2];
     public string SearchText { get => search; set { search = value; Notify(); FilterProfiles(); } }
@@ -91,15 +139,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         audio = preview ?? new AudioPreview();
         NumberParameter P(string name, string unit, double min, double max, double step, string help,
-            Func<SoundRecipe, double> read, Func<SoundRecipe, double, SoundRecipe> write) =>
-            new(name, unit, min, max, step, help, () => read(Current), v => Apply(write(Current, v)));
+            Func<SoundRecipe, double> read, Func<SoundRecipe, double, SoundRecipe> write,
+            Func<(double Minimum, double Maximum)>? bounds = null) =>
+            new(name, unit, min, max, step, help, () => read(Current), v => Apply(write(Current, v)), bounds);
         NumberParameter E(string name, string unit, double min, double max, double step, string help,
-            Func<EffectSettings, double> read, Func<EffectSettings, double, EffectSettings> write) =>
-            P(name, unit, min, max, step, help, r => read(r.Effects), (r,v) => r with { Effects = write(r.Effects, v) });
+            Func<EffectSettings, double> read, Func<EffectSettings, double, EffectSettings> write,
+            Func<(double Minimum, double Maximum)>? bounds = null) =>
+            P(name, unit, min, max, step, help, r => read(r.Effects), (r,v) => r with { Effects = write(r.Effects, v) }, bounds);
+        InstrumentTempoParameter = new("Tempo", "BPM", 40, 200, 1, "Phrase tempo, from 40 to 200 beats per minute.",
+            () => InstrumentTempo, v => InstrumentTempo = (int)Math.Round(v));
         SimpleParameters = new NumberParameter[]
         {
-            P("Duration", "s", .03, 30, .01, "Total file length, including release and echoes. Layers starting after this time are silent.", r => r.DurationSeconds, (r,v) => r with { DurationSeconds = v }),
-            P("Pitch", "st", -36, 36, .5, "Transpose every layer. 12 semitones is one octave.", r => r.PitchSemitones, (r,v) => r with { PitchSemitones = v }),
+            P("Duration", "s", .03, 30, .01, "Total file length. Instruments reserve their release tail; phrase loops have a fixed two-bar length.", r => r.DurationSeconds, (r,v) => r with { DurationSeconds = v }, DurationBounds),
+            P("Pitch", "st", -36, 36, .5, "Transpose every layer. Acoustic limits account for all phrase notes and vibrato.", r => r.PitchSemitones, (r,v) => r with { PitchSemitones = v }, PitchBounds),
             E("Brightness", "Hz", 40, 20000, 10, "Low-pass cutoff. Lower values make the sound darker.", e => e.LowPassHz, (e,v) => e with { LowPassHz = v }),
             P("Noise amount", "", 0, 1, .01, "Controls noise layers and adds texture to tonal layers. Zero mutes noise sources.", r => r.NoiseAmount, (r,v) => r with { NoiseAmount = v }),
             P("Output level", "dB", -60, 6, .5, "Final gain, after optional normalization to −1 dBFS. Positive gain can clip.", r => r.OutputDb, (r,v) => r with { OutputDb = v })
@@ -116,7 +168,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             new("Movement and echo", new NumberParameter[]
             {
                 E("Vibrato speed", "Hz", 0, 20, .1, "Speed of pitch movement.", e => e.VibratoHz, (e,v) => e with { VibratoHz = v }),
-                E("Vibrato depth", "st", 0, 2, .01, "Amount of pitch movement. Zero disables vibrato.", e => e.VibratoSemitones, (e,v) => e with { VibratoSemitones = v }),
+                E("Vibrato depth", "st", 0, 2, .01, "Amount of pitch movement. Acoustic limits keep every note within the bundled range.", e => e.VibratoSemitones, (e,v) => e with { VibratoSemitones = v }, VibratoBounds),
                 E("Tremolo speed", "Hz", 0, 30, .1, "Speed of rhythmic volume movement.", e => e.TremoloHz, (e,v) => e with { TremoloHz = v }),
                 E("Tremolo depth", "", 0, 1, .01, "Amount of volume movement. Zero disables tremolo.", e => e.TremoloDepth, (e,v) => e with { TremoloDepth = v }),
                 E("Delay time", "s", .01, 1, .01, "Time between echoes. Loop echoes wrap around the file boundary.", e => e.DelaySeconds, (e,v) => e with { DelaySeconds = v }),
@@ -150,6 +202,36 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public Task InitializeAsync() => RenderAsync();
+    private (double Minimum, double Maximum) DurationBounds()
+    {
+        if (Current.Instrument is null) return (.03, 30);
+        if (Current.Loop && Current.Instrument.Mode == InstrumentMode.Phrase)
+        {
+            double duration = 8 * 60.0 / Current.Instrument.Tempo;
+            return (duration, duration);
+        }
+        return (Current.Loop ? .03 : InstrumentCatalog.RequiredDuration(Current.Instrument), 30);
+    }
+    private (double Minimum, double Maximum) AcousticPitchBounds()
+    {
+        var settings = Current.Instrument!;
+        var zones = AcousticLibrary.Zones.Where(z => z.InstrumentId == settings.Id).ToArray();
+        var notes = InstrumentCatalog.Notes(settings);
+        return (zones.Min(z => Math.Max(z.MinMidi, z.RootMidi - 4)) - notes.Min(n => n.MidiNote),
+            zones.Max(z => Math.Min(z.MaxMidi, z.RootMidi + 4)) - notes.Max(n => n.MidiNote));
+    }
+    private (double Minimum, double Maximum) PitchBounds()
+    {
+        if (Current.Instrument?.Style != InstrumentStyle.Acoustic) return (-36, 36);
+        var (minimum, maximum) = AcousticPitchBounds();
+        return (Math.Max(-36, minimum + Current.Effects.VibratoSemitones), Math.Min(36, maximum - Current.Effects.VibratoSemitones));
+    }
+    private (double Minimum, double Maximum) VibratoBounds()
+    {
+        if (Current.Instrument?.Style != InstrumentStyle.Acoustic) return (0, 2);
+        var (minimum, maximum) = AcousticPitchBounds();
+        return (0, Math.Max(0, Math.Min(2, Math.Min(Current.PitchSemitones - minimum, maximum - Current.PitchSemitones))));
+    }
     public void BeginGesture() => gestureStart ??= Current;
     public void EndGesture()
     {
@@ -174,6 +256,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void Apply(SoundRecipe next, bool recordHistory = true)
     {
+        if (next.Instrument is not null && !next.Loop)
+            next = next with { DurationSeconds = Math.Max(next.DurationSeconds, InstrumentCatalog.RequiredDuration(next.Instrument)) };
+        if (next.Instrument?.Mode == InstrumentMode.Phrase && next.Loop)
+            next = next with { DurationSeconds = 8 * 60.0 / next.Instrument.Tempo };
         RecipeValidator.Validate(next);
         if (recordHistory && gestureStart is null) history.Commit(Current, next);
         StopAudio();
@@ -187,7 +273,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void RefreshEditors()
     {
         foreach (var property in new[] { nameof(SelectedCategory), nameof(SelectedProfile), nameof(ProfileDescription), nameof(RecipeName), nameof(Seed), nameof(Loop), nameof(Normalize), nameof(SampleRate), nameof(Channels) }) Notify(property);
+        foreach (var property in new[] { nameof(IsInstrument), nameof(IsSynthesis), nameof(IsPitchedInstrument), nameof(IsInstrumentPhrase),
+            nameof(SelectedInstrument), nameof(InstrumentStyles), nameof(InstrumentPhrases), nameof(InstrumentStyle), nameof(InstrumentMode),
+            nameof(InstrumentPhrase), nameof(InstrumentScale), nameof(InstrumentKey), nameof(InstrumentOctave), nameof(InstrumentTempo), nameof(InstrumentHelp) }) Notify(property);
         foreach (var p in SimpleParameters.Concat(EffectGroups.SelectMany(g => g.Parameters))) p.Refresh();
+        InstrumentTempoParameter.Refresh();
         foreach (var l in Layers) l.Refresh();
         FilterProfiles();
         CommandManager.InvalidateRequerySuggested();

@@ -12,12 +12,13 @@ public sealed class GeneratorTests
     public static IEnumerable<object[]> ProfileIds => SoundCatalog.Profiles.Select(p => new object[] { p.Id });
 
     [Fact]
-    public void CatalogCoversEveryCategoryWithTwoConfigurations()
+    public void CatalogPreservesEffectCategoriesAndAddsSevenInstruments()
     {
-        Assert.Equal(13, SoundCatalog.Categories.Count);
-        Assert.Equal(26, SoundCatalog.Profiles.Count);
-        Assert.Equal(26, SoundCatalog.Profiles.Select(p => p.Id).Distinct().Count());
-        foreach (var category in SoundCatalog.Categories)
+        Assert.Equal(14, SoundCatalog.Categories.Count);
+        Assert.Equal(33, SoundCatalog.Profiles.Count);
+        Assert.Equal(33, SoundCatalog.Profiles.Select(p => p.Id).Distinct().Count());
+        Assert.Equal(7, SoundCatalog.Profiles.Count(p => p.CategoryId == "instruments"));
+        foreach (var category in SoundCatalog.Categories.Where(c => c.Id != "instruments"))
             Assert.Equal(2, SoundCatalog.Profiles.Count(p => p.CategoryId == category.Id));
     }
 

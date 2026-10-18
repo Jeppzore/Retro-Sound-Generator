@@ -14,7 +14,7 @@ public static class SoundCatalog
         new("teleport", "Teleporters and traversal"), new("quest", "NPCs, dialogue and quests"),
         new("profession", "Profession audio"), new("trade", "Trading and crafting"),
         new("inventory", "Inventory and equipment"), new("ui", "UI and menus"),
-        new("world", "World interactions")
+        new("world", "World interactions"), new("instruments", "Instruments · Medieval")
     };
 
     public static IReadOnlyList<SoundProfile> Profiles { get; } = BuildProfiles();
@@ -115,6 +115,18 @@ public static class SoundCatalog
         Add("world", "mineral", "Mineral break", "A crunchy fracture with scattered mineral overtones.", .65, .8, 8500,
             [Noise(.8) with { Gate = .2 }, Tone(900, WaveSource.Triangle, .3) with { Notes = [0, -7, 5], NoteSeconds = .07, Sustain = 0 }, Tone(1567, level: .2) with { StartSeconds = .08, Sustain = 0 }],
             new() { Saturation = .3, DelayMix = .18, DelaySeconds = .065 });
+        foreach (var instrument in InstrumentCatalog.All)
+        {
+            var settings = InstrumentCatalog.Defaults(instrument.Id);
+            var recipe = new SoundRecipe
+            {
+                CategoryId = "instruments", ConfigurationId = "instrument-" + instrument.Id,
+                Name = instrument.Name, Instrument = settings, NoiseAmount = .03,
+                DurationSeconds = InstrumentCatalog.RequiredDuration(settings), Layers = [new()],
+                Effects = new() { LowPassHz = 12000 }
+            };
+            items.Add(new(recipe.ConfigurationId, recipe.CategoryId, instrument.Name, instrument.Description, recipe, 0, 0));
+        }
         return items.AsReadOnly();
     }
 }
@@ -139,6 +151,12 @@ public static class RecipeRandomizer
     public static SoundRecipe Randomize(SoundRecipe current, int seed)
     {
         RecipeValidator.Validate(current);
+        if (current.Instrument is not null)
+        {
+            var variation = new StableRandom(seed);
+            return current with { Seed = seed, NoiseAmount = variation.Between(.01, .1),
+                Effects = current.Effects with { LowPassHz = variation.Between(5000, 16000) } };
+        }
         var profile = SoundCatalog.Profiles.First(p => p.Id == current.ConfigurationId);
         var basis = profile.Default;
         var rng = new StableRandom(seed);

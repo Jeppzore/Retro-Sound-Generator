@@ -53,6 +53,7 @@ public sealed record SoundRecipe
     public int SampleRate { get; init; } = 44100;
     public int Channels { get; init; } = 1;
     public bool Normalize { get; init; } = true;
+    public InstrumentSettings? Instrument { get; init; }
     [JsonRequired] public LayerSettings[] Layers { get; init; } = [];
     [JsonRequired] public EffectSettings Effects { get; init; } = new();
 }
@@ -102,6 +103,20 @@ public static class RecipeValidator
         Range(r.PitchSemitones, -36, 36, "Master pitch");
         Range(r.NoiseAmount, 0, 1, "Noise amount");
         Range(r.OutputDb, -60, 6, "Output level");
+        if (r.Instrument is not null)
+        {
+            InstrumentCatalog.Validate(r.Instrument);
+            if (r.Effects is null) throw new InvalidDataException("Effects settings are missing.");
+            if (r.CategoryId != "instruments" || r.ConfigurationId != "instrument-" + r.Instrument.Id)
+                throw new InvalidDataException("The instrument must match its starting configuration.");
+            if (r.Instrument.Style == InstrumentStyle.Acoustic)
+                foreach (var note in InstrumentCatalog.Notes(r.Instrument))
+                {
+                    AcousticLibrary.Select(r.Instrument.Id, note.MidiNote + r.PitchSemitones - r.Effects.VibratoSemitones);
+                    AcousticLibrary.Select(r.Instrument.Id, note.MidiNote + r.PitchSemitones + r.Effects.VibratoSemitones);
+                }
+        }
+        else if (r.CategoryId == "instruments") throw new InvalidDataException("Instrument settings are missing.");
         if (r.SampleRate is not (44100 or 48000) || r.Channels is not (1 or 2))
             throw new InvalidDataException("Choose 44.1 or 48 kHz, and mono or stereo.");
         if (r.Layers is null || r.Layers.Length is < 1 or > 3 || r.Layers.Any(l => l is null))
