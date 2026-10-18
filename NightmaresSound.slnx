@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NightmaresSound.Core/NightmaresSound.Core.csproj" />
+    <Project Path="src/NightmaresSound.App/NightmaresSound.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NightmaresSound.Tests/NightmaresSound.Tests.csproj" />
+    <Project Path="tests/NightmaresSound.DesktopTests/NightmaresSound.DesktopTests.csproj" />
+  </Folder>
+</Solution>

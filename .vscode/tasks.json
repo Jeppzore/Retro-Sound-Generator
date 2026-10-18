@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["build", "${workspaceFolder}/NightmaresSound.slnx"],
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "run",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["run", "--project", "${workspaceFolder}/src/NightmaresSound.App"],
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "test",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["test", "${workspaceFolder}/NightmaresSound.slnx"],
+      "group": "test",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "publish Windows executable",
+      "type": "process",
+      "command": "dotnet",
+      "args": ["publish", "${workspaceFolder}/src/NightmaresSound.App", "-c", "Release", "-r", "win-x64", "--self-contained", "true", "-p:PublishSingleFile=true", "-p:IncludeNativeLibrariesForSelfExtract=true", "-o", "${workspaceFolder}/artifacts/publish/win-x64"],
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}
