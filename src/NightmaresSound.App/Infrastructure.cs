@@ -45,7 +45,7 @@ public sealed class AsyncUiCommand(Func<Task> execute, Action<Exception> onError
 
 public sealed class NumberParameter(string label, string unit, double min, double max, double step,
     string description, Func<double> read, Action<double> write,
-    Func<(double Minimum, double Maximum)>? bounds = null) : ObservableObject, INotifyDataErrorInfo
+    Func<(double Minimum, double Maximum)>? bounds = null, SoundConcept concept = SoundConcept.Output) : ObservableObject, INotifyDataErrorInfo
 {
     private string? text, inputError;
     private bool refreshing;
@@ -56,6 +56,8 @@ public sealed class NumberParameter(string label, string unit, double min, doubl
     public bool IsEditable => Minimum < Maximum;
     public double Step { get; } = step;
     public string Description { get; } = description;
+    public SoundConcept Concept { get; } = concept;
+    public string TeachingDescription => $"{Semantic.Describe(Concept)} · {Description}";
     public bool HasErrors => inputError is not null;
     public event EventHandler<DataErrorsChangedEventArgs>? ErrorsChanged;
     public IEnumerable GetErrors(string? propertyName) =>

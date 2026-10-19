@@ -12,7 +12,7 @@ using Xunit;
 
 namespace NightmaresSound.DesktopTests;
 
-public sealed class DesktopTests
+public sealed partial class DesktopTests
 {
     private static readonly Lazy<Dispatcher> Ui = new(() =>
     {
@@ -153,7 +153,7 @@ public sealed class DesktopTests
             }
             var bitmap = new RenderTargetBitmap((int)(width * dpi / 96.0), (int)(height * dpi / 96.0), dpi, dpi, PixelFormats.Pbgra32);
             var background = new DrawingVisual();
-            using (var drawing = background.RenderOpen()) drawing.DrawRectangle(SystemColors.ControlBrush, null, new Rect(0, 0, width, height));
+            using (var drawing = background.RenderOpen()) drawing.DrawRectangle(window.Background, null, new Rect(0, 0, width, height));
             bitmap.Render(background);
             bitmap.Render(content);
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));

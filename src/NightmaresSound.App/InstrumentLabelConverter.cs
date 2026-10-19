@@ -16,7 +16,7 @@ public sealed class InstrumentLabelConverter : IValueConverter
         InstrumentPhrase.Melody => "Modal melody",
         InstrumentPhrase.March => "March rhythm",
         InstrumentPhrase.Dance => "Dance rhythm",
-        _ => value.ToString() ?? ""
+        _ => value?.ToString() ?? ""
     };
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotSupportedException();
 }

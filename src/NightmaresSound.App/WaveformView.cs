@@ -10,14 +10,31 @@ public sealed class WaveformView : FrameworkElement
         typeof(WaveformView), new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
     public RenderedSound? Sound { get => (RenderedSound?)GetValue(SoundProperty); set => SetValue(SoundProperty, value); }
 
+    public static readonly DependencyProperty BackgroundProperty = DependencyProperty.Register(nameof(Background), typeof(Brush),
+        typeof(WaveformView), new FrameworkPropertyMetadata(Brushes.Transparent, FrameworkPropertyMetadataOptions.AffectsRender));
+    public Brush Background { get => (Brush)GetValue(BackgroundProperty); set => SetValue(BackgroundProperty, value); }
+    public static readonly DependencyProperty TraceProperty = DependencyProperty.Register(nameof(Trace), typeof(Brush),
+        typeof(WaveformView), new FrameworkPropertyMetadata(Brushes.Teal, FrameworkPropertyMetadataOptions.AffectsRender));
+    public Brush Trace { get => (Brush)GetValue(TraceProperty); set => SetValue(TraceProperty, value); }
+    public static readonly DependencyProperty GridBrushProperty = DependencyProperty.Register(nameof(GridBrush), typeof(Brush),
+        typeof(WaveformView), new FrameworkPropertyMetadata(Brushes.Gray, FrameworkPropertyMetadataOptions.AffectsRender));
+    public Brush GridBrush { get => (Brush)GetValue(GridBrushProperty); set => SetValue(GridBrushProperty, value); }
+
+    public WaveformView()
+    {
+        SetResourceReference(BackgroundProperty, "InputBrush");
+        SetResourceReference(TraceProperty, "OutputBrush");
+        SetResourceReference(GridBrushProperty, "ControlBorderBrush");
+    }
+
     protected override void OnRender(DrawingContext dc)
     {
         base.OnRender(dc);
-        dc.DrawRectangle(SystemColors.WindowBrush, new Pen(SystemColors.ControlDarkBrush, 1), new Rect(RenderSize));
+        dc.DrawRectangle(Background, new Pen(GridBrush, 1), new Rect(RenderSize));
         if (Sound is not { } sound || ActualWidth < 2 || ActualHeight < 2) return;
         int columns = Math.Max(1, (int)ActualWidth - 2);
-        var line = new Pen(SystemParameters.HighContrast ? SystemColors.WindowTextBrush : Brushes.Teal, 1);
-        var axis = new Pen(SystemColors.ControlDarkBrush, .5);
+        var line = new Pen(Trace, 1);
+        var axis = new Pen(GridBrush, .5);
         double channelHeight = (ActualHeight - 2) / sound.Channels;
         for (int c = 0; c < sound.Channels; c++)
         {

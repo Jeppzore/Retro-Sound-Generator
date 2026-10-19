@@ -1,8 +1,23 @@
-# Retro Sounds Generator 1.1 — Instruments
+# Retro Sounds Generator 1.2 — Nightmares Studio
 
 A local Windows desktop sound generator for the 2D game **Nightmares**, written in C# and WPF on .NET 10. Create stylized retro and textured effects, evolving cues, and procedural ambience loops, then export **signed 16-bit PCM WAV** files.
 
-The app starts silently and writes no audio files until you choose **Export WAV**. It needs no account or network connection after installation. Version 1.1 adds seven medieval-inspired instruments, including bundled CC0 acoustic recordings for four voices.
+The app starts silently and writes no audio files until you choose **Export WAV**. It needs no account or network connection after installation. Version 1.2 introduces a dark studio interface with educational colors. The seven medieval-inspired instruments remain available, including bundled CC0 acoustic recordings for four voices.
+
+## Educational color guide
+
+The charcoal interface uses subtle texture around solid editing surfaces. A labeled color guide above the sound controls explains the accents:
+
+- **Orange — Pitch & music:** pitch, sweep, key, scale, octave, phrases, and note offsets.
+- **Purple — Timbre & effects:** sound sources, instrument styles, brightness, filters, noise, distortion, and effect depth/mix.
+- **Blue — Timing & envelopes:** duration, tempo, envelopes, modulation speeds, delay time, and looping.
+- **Teal — Levels & output:** gain, pan, normalization, output format, and the waveform.
+
+Numeric controls carry matching row markers and concept names in their help tooltips. Brightness and Low-pass cutoff share a color because they edit the same setting. Error messages and invalid fields use red; clipping warnings use yellow. Labels and warning text retain meaning without color. Windows High Contrast uses the system palette instead of decorative colors and texture. File dialogs and the window frame follow Windows settings.
+
+Version 1.2 preserves the three-column workflow, shortcuts, recipe format, preview, synthesis, and WAV export behavior.
+
+A presentation bug found during accessibility testing was fixed: instrument labels now tolerate an empty binding value while WPF tears down or rebuilds a control template.
 
 ## Medieval instruments
 

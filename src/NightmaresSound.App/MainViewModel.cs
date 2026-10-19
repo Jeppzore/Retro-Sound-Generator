@@ -138,42 +138,42 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public MainViewModel(IAudioPreview? preview = null)
     {
         audio = preview ?? new AudioPreview();
-        NumberParameter P(string name, string unit, double min, double max, double step, string help,
+        NumberParameter P(string name, SoundConcept concept, string unit, double min, double max, double step, string help,
             Func<SoundRecipe, double> read, Func<SoundRecipe, double, SoundRecipe> write,
             Func<(double Minimum, double Maximum)>? bounds = null) =>
-            new(name, unit, min, max, step, help, () => read(Current), v => Apply(write(Current, v)), bounds);
-        NumberParameter E(string name, string unit, double min, double max, double step, string help,
+            new(name, unit, min, max, step, help, () => read(Current), v => Apply(write(Current, v)), bounds, concept);
+        NumberParameter E(string name, SoundConcept concept, string unit, double min, double max, double step, string help,
             Func<EffectSettings, double> read, Func<EffectSettings, double, EffectSettings> write,
             Func<(double Minimum, double Maximum)>? bounds = null) =>
-            P(name, unit, min, max, step, help, r => read(r.Effects), (r,v) => r with { Effects = write(r.Effects, v) }, bounds);
+            P(name, concept, unit, min, max, step, help, r => read(r.Effects), (r,v) => r with { Effects = write(r.Effects, v) }, bounds);
         InstrumentTempoParameter = new("Tempo", "BPM", 40, 200, 1, "Phrase tempo, from 40 to 200 beats per minute.",
-            () => InstrumentTempo, v => InstrumentTempo = (int)Math.Round(v));
+            () => InstrumentTempo, v => InstrumentTempo = (int)Math.Round(v), concept: SoundConcept.Timing);
         SimpleParameters = new NumberParameter[]
         {
-            P("Duration", "s", .03, 30, .01, "Total file length. Instruments reserve their release tail; phrase loops have a fixed two-bar length.", r => r.DurationSeconds, (r,v) => r with { DurationSeconds = v }, DurationBounds),
-            P("Pitch", "st", -36, 36, .5, "Transpose every layer. Acoustic limits account for all phrase notes and vibrato.", r => r.PitchSemitones, (r,v) => r with { PitchSemitones = v }, PitchBounds),
-            E("Brightness", "Hz", 40, 20000, 10, "Low-pass cutoff. Lower values make the sound darker.", e => e.LowPassHz, (e,v) => e with { LowPassHz = v }),
-            P("Noise amount", "", 0, 1, .01, "Controls noise layers and adds texture to tonal layers. Zero mutes noise sources.", r => r.NoiseAmount, (r,v) => r with { NoiseAmount = v }),
-            P("Output level", "dB", -60, 6, .5, "Final gain, after optional normalization to −1 dBFS. Positive gain can clip.", r => r.OutputDb, (r,v) => r with { OutputDb = v })
+            P("Duration", SoundConcept.Timing, "s", .03, 30, .01, "Total file length. Instruments reserve their release tail; phrase loops have a fixed two-bar length.", r => r.DurationSeconds, (r,v) => r with { DurationSeconds = v }, DurationBounds),
+            P("Pitch", SoundConcept.Pitch, "st", -36, 36, .5, "Transpose every layer. Acoustic limits account for all phrase notes and vibrato.", r => r.PitchSemitones, (r,v) => r with { PitchSemitones = v }, PitchBounds),
+            E("Brightness", SoundConcept.Timbre, "Hz", 40, 20000, 10, "Low-pass cutoff. Lower values make the sound darker.", e => e.LowPassHz, (e,v) => e with { LowPassHz = v }),
+            P("Noise amount", SoundConcept.Timbre, "", 0, 1, .01, "Controls noise layers and adds texture to tonal layers. Zero mutes noise sources.", r => r.NoiseAmount, (r,v) => r with { NoiseAmount = v }),
+            P("Output level", SoundConcept.Output, "dB", -60, 6, .5, "Final gain, after optional normalization to −1 dBFS. Positive gain can clip.", r => r.OutputDb, (r,v) => r with { OutputDb = v })
         };
         EffectGroups = new ParameterGroup[]
         {
             new("Filters and texture", new NumberParameter[]
             {
-                E("Low-pass cutoff", "Hz", 40, 20000, 10, "The same setting as Brightness above.", e => e.LowPassHz, (e,v) => e with { LowPassHz = v }),
-                E("High-pass cutoff", "Hz", 0, 8000, 10, "Removes low frequencies. Zero bypasses this filter.", e => e.HighPassHz, (e,v) => e with { HighPassHz = v }),
-                E("Saturation", "", 0, 1, .01, "Adds driven harmonics and soft distortion.", e => e.Saturation, (e,v) => e with { Saturation = v }),
-                E("Bit reduction", "bits", 4, 16, 1, "Lower values add retro quantization. The exported file is always 16-bit PCM.", e => e.BitDepth, (e,v) => e with { BitDepth = (int)Math.Round(v) })
+                E("Low-pass cutoff", SoundConcept.Timbre, "Hz", 40, 20000, 10, "The same setting as Brightness above.", e => e.LowPassHz, (e,v) => e with { LowPassHz = v }),
+                E("High-pass cutoff", SoundConcept.Timbre, "Hz", 0, 8000, 10, "Removes low frequencies. Zero bypasses this filter.", e => e.HighPassHz, (e,v) => e with { HighPassHz = v }),
+                E("Saturation", SoundConcept.Timbre, "", 0, 1, .01, "Adds driven harmonics and soft distortion.", e => e.Saturation, (e,v) => e with { Saturation = v }),
+                E("Bit reduction", SoundConcept.Timbre, "bits", 4, 16, 1, "Lower values add retro quantization. The exported file is always 16-bit PCM.", e => e.BitDepth, (e,v) => e with { BitDepth = (int)Math.Round(v) })
             }),
             new("Movement and echo", new NumberParameter[]
             {
-                E("Vibrato speed", "Hz", 0, 20, .1, "Speed of pitch movement.", e => e.VibratoHz, (e,v) => e with { VibratoHz = v }),
-                E("Vibrato depth", "st", 0, 2, .01, "Amount of pitch movement. Acoustic limits keep every note within the bundled range.", e => e.VibratoSemitones, (e,v) => e with { VibratoSemitones = v }, VibratoBounds),
-                E("Tremolo speed", "Hz", 0, 30, .1, "Speed of rhythmic volume movement.", e => e.TremoloHz, (e,v) => e with { TremoloHz = v }),
-                E("Tremolo depth", "", 0, 1, .01, "Amount of volume movement. Zero disables tremolo.", e => e.TremoloDepth, (e,v) => e with { TremoloDepth = v }),
-                E("Delay time", "s", .01, 1, .01, "Time between echoes. Loop echoes wrap around the file boundary.", e => e.DelaySeconds, (e,v) => e with { DelaySeconds = v }),
-                E("Delay mix", "", 0, .8, .01, "Balance between the original sound and echoes. Zero disables delay.", e => e.DelayMix, (e,v) => e with { DelayMix = v }),
-                E("Delay feedback", "", 0, .75, .01, "Amount returned to the next echo.", e => e.DelayFeedback, (e,v) => e with { DelayFeedback = v })
+                E("Vibrato speed", SoundConcept.Timing, "Hz", 0, 20, .1, "Speed of pitch movement.", e => e.VibratoHz, (e,v) => e with { VibratoHz = v }),
+                E("Vibrato depth", SoundConcept.Timbre, "st", 0, 2, .01, "Amount of pitch movement. Acoustic limits keep every note within the bundled range.", e => e.VibratoSemitones, (e,v) => e with { VibratoSemitones = v }, VibratoBounds),
+                E("Tremolo speed", SoundConcept.Timing, "Hz", 0, 30, .1, "Speed of rhythmic volume movement.", e => e.TremoloHz, (e,v) => e with { TremoloHz = v }),
+                E("Tremolo depth", SoundConcept.Timbre, "", 0, 1, .01, "Amount of volume movement. Zero disables tremolo.", e => e.TremoloDepth, (e,v) => e with { TremoloDepth = v }),
+                E("Delay time", SoundConcept.Timing, "s", .01, 1, .01, "Time between echoes. Loop echoes wrap around the file boundary.", e => e.DelaySeconds, (e,v) => e with { DelaySeconds = v }),
+                E("Delay mix", SoundConcept.Timbre, "", 0, .8, .01, "Balance between the original sound and echoes. Zero disables delay.", e => e.DelayMix, (e,v) => e with { DelayMix = v }),
+                E("Delay feedback", SoundConcept.Timbre, "", 0, .75, .01, "Amount returned to the next echo.", e => e.DelayFeedback, (e,v) => e with { DelayFeedback = v })
             })
         };
         Layers = Enumerable.Range(0, 3).Select(i => new LayerEditorViewModel(this, i)).ToArray();
