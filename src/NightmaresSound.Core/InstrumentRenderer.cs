@@ -2,18 +2,33 @@ namespace NightmaresSound.Core;
 
 internal static class InstrumentRenderer
 {
-    public static void Mix(double[] mix, SoundRecipe recipe, CancellationToken token)
+    public static bool Mix(double[] mix, SoundRecipe recipe, CancellationToken token)
     {
-        var settings = recipe.Instrument!;
+        for (int slot = 0; slot < recipe.Instrument!.Voices.Length; slot++)
+        {
+            var voice = recipe.Instrument.Voices[slot];
+            if (!voice.Enabled || voice.Level == 0) continue;
+            if (!MixVoice(mix, recipe, voice, slot, token)) return false;
+        }
+        return !token.IsCancellationRequested;
+    }
+
+    private static bool MixVoice(double[] mix, SoundRecipe recipe, InstrumentVoiceSettings voice, int slot, CancellationToken token)
+    {
+        var settings = InstrumentCatalog.ForVoice(recipe.Instrument!, voice);
         var definition = InstrumentCatalog.Get(settings.Id);
         var notes = InstrumentCatalog.Notes(settings);
+        // Preserve the original centered single-voice amplitude in stereo.
+        double left = voice.Pan <= 0 ? 1 : Math.Cos(voice.Pan * Math.PI / 2);
+        double right = voice.Pan >= 0 ? 1 : Math.Cos(-voice.Pan * Math.PI / 2);
         for (int noteIndex = 0; noteIndex < notes.Count; noteIndex++)
         {
-            token.ThrowIfCancellationRequested();
+            if (token.IsCancellationRequested) return false;
             var note = notes[noteIndex];
-            var rng = new StableRandom(unchecked(recipe.Seed + noteIndex * 7919));
-            double midi = note.MidiNote + recipe.PitchSemitones;
-            double hz = definition.IsDrum ? 82.4 * Math.Pow(2, recipe.PitchSemitones / 12)
+            var rng = new StableRandom(unchecked(recipe.Seed + noteIndex * 7919 + slot * 104729));
+            double pitch = recipe.PitchSemitones + voice.TuningSemitones;
+            double midi = note.MidiNote + pitch;
+            double hz = definition.IsDrum ? 82.4 * Math.Pow(2, pitch / 12)
                 : 440 * Math.Pow(2, (midi - 69) / 12);
             var sample = settings.Style == InstrumentStyle.Acoustic ? AcousticLibrary.Select(settings.Id, midi) : null;
             var audio = sample is null ? null : AcousticLibrary.Load(sample);
@@ -22,7 +37,7 @@ internal static class InstrumentRenderer
             int length = (int)Math.Ceiling((note.GateSeconds + definition.ReleaseSeconds) * recipe.SampleRate);
             for (int frame = 0; frame < length; frame++)
             {
-                if ((frame & 1023) == 0) token.ThrowIfCancellationRequested();
+                if ((frame & 1023) == 0 && token.IsCancellationRequested) return false;
                 int destination = start + frame;
                 int totalFrames = mix.Length / recipe.Channels;
                 if (!recipe.Loop && destination >= totalFrames) break;
@@ -57,9 +72,11 @@ internal static class InstrumentRenderer
                     envelope *= Math.Pow(Math.Max(0, 1 - (t - note.GateSeconds) / definition.ReleaseSeconds), 2);
                 double tremolo = 1 - recipe.Effects.TremoloDepth * .5 * (1 - Math.Cos(2 * Math.PI * recipe.Effects.TremoloHz * t));
                 value = (value + noise * recipe.NoiseAmount * .03 * Math.Exp(-t * 30)) * envelope * note.Velocity * .55 * tremolo;
-                for (int c = 0; c < recipe.Channels; c++) mix[destination * recipe.Channels + c] += value;
+                mix[destination * recipe.Channels] += value * voice.Level * (recipe.Channels == 1 ? 1 : left);
+                if (recipe.Channels == 2) mix[destination * 2 + 1] += value * voice.Level * right;
             }
         }
+        return !token.IsCancellationRequested;
     }
 
     private static double Voice(string id, double phase, double hz, double t, int rate, double noise)

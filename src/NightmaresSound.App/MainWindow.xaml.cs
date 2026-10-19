@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 
@@ -17,6 +18,22 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => await viewModel.InitializeAsync();
         PreviewMouseDown += (_, args) => { if (FindSlider(args.OriginalSource as DependencyObject) is not null) viewModel.BeginGesture(); };
         PreviewMouseUp += (_, _) => viewModel.EndGesture();
+        AddHandler(Thumb.DragStartedEvent, new DragStartedEventHandler((_, args) =>
+        {
+            if (FindSlider(args.OriginalSource as DependencyObject) is not null) viewModel.BeginGesture();
+        }), handledEventsToo: true);
+        AddHandler(Thumb.DragCompletedEvent, new DragCompletedEventHandler((_, args) =>
+        {
+            if (FindSlider(args.OriginalSource as DependencyObject) is not null) viewModel.EndGesture();
+        }), handledEventsToo: true);
+        AddHandler(Mouse.LostMouseCaptureEvent, new MouseEventHandler((_, args) =>
+        {
+            if (FindSlider(args.OriginalSource as DependencyObject) is not null) viewModel.EndGesture();
+        }), handledEventsToo: true);
+        PreviewLostKeyboardFocus += (_, args) =>
+        {
+            if (FindSlider(args.OldFocus as DependencyObject) is not null) viewModel.EndGesture();
+        };
         PreviewKeyDown += (_, args) =>
         {
             if (FindSlider(args.OriginalSource as DependencyObject) is not null && IsSliderKey(args.Key)) viewModel.BeginGesture();

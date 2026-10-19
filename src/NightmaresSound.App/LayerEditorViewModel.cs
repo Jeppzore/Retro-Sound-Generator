@@ -33,7 +33,7 @@ public sealed class LayerEditorViewModel : ObservableObject
         this.owner = owner; this.index = index;
         NumberParameter P(string name, SoundConcept concept, string unit, double min, double max, double step, string help,
             Func<LayerSettings, double> read, Func<LayerSettings, double, LayerSettings> write) =>
-            new(name, unit, min, max, step, help, () => read(Current), v => Change(l => write(l, v)), concept: concept);
+            new(name, unit, min, max, step, help, () => read(Current), v => Change(l => write(l, v)), concept: concept, isRefreshing: () => owner.IsRefreshingEditors);
         Parameters = new NumberParameter[]
         {
             P("Level", SoundConcept.Output, "", 0, 1, .01, "Volume of this layer before mixing.", l => l.Level, (l,v) => l with { Level = v }),

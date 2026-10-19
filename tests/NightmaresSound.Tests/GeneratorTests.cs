@@ -154,7 +154,7 @@ public sealed class GeneratorTests
         var r = SoundCatalog.Create("clink");
         SoundRecipe[] invalid =
         [
-            r with { Version = 2 }, r with { DurationSeconds = double.NaN }, r with { DurationSeconds = 31 },
+            r with { Version = 3 }, r with { DurationSeconds = double.NaN }, r with { DurationSeconds = 31 },
             r with { SampleRate = 22050 }, r with { Channels = 3 }, r with { Name = "" },
             r with { CategoryId = "ui" }, r with { ConfigurationId = "missing" },
             r with { Layers = [] }, r with { Layers = null! }, r with { Effects = null! },
@@ -170,7 +170,7 @@ public sealed class GeneratorTests
             Assert.Throws<InvalidDataException>(() => RecipeFile.Deserialize(text));
         string json = RecipeFile.Serialize(r);
         Assert.Throws<InvalidDataException>(() => RecipeFile.Deserialize(json.Replace("\"Sine\"", "\"Unknown\"")));
-        Assert.Throws<InvalidDataException>(() => RecipeFile.Deserialize(json.Replace("\"Version\": 1", "\"UnknownField\": 1")));
+        Assert.Throws<InvalidDataException>(() => RecipeFile.Deserialize(json.Replace("\"Version\": 2", "\"UnknownField\": 1")));
     }
 
     [Fact]

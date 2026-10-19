@@ -45,7 +45,8 @@ public sealed class AsyncUiCommand(Func<Task> execute, Action<Exception> onError
 
 public sealed class NumberParameter(string label, string unit, double min, double max, double step,
     string description, Func<double> read, Action<double> write,
-    Func<(double Minimum, double Maximum)>? bounds = null, SoundConcept concept = SoundConcept.Output) : ObservableObject, INotifyDataErrorInfo
+    Func<(double Minimum, double Maximum)>? bounds = null, SoundConcept concept = SoundConcept.Output,
+    Func<bool>? isRefreshing = null) : ObservableObject, INotifyDataErrorInfo
 {
     private string? text, inputError;
     private bool refreshing;
@@ -71,7 +72,7 @@ public sealed class NumberParameter(string label, string unit, double min, doubl
         get => Value;
         set
         {
-            if (refreshing) return;
+            if (refreshing || isRefreshing?.Invoke() == true) return;
             if (double.IsFinite(value)) TryWrite(Math.Clamp(value, Minimum, Maximum));
             Notify(nameof(SliderValue));
         }
@@ -82,6 +83,7 @@ public sealed class NumberParameter(string label, string unit, double min, doubl
         get => text ?? Value.ToString("G", CultureInfo.InvariantCulture);
         set
         {
+            if (refreshing || isRefreshing?.Invoke() == true) return;
             text = value;
             if ((!double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var number)
                 && !double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out number))
@@ -124,6 +126,7 @@ public sealed class NumberParameter(string label, string unit, double min, doubl
     {
         // Updating bound limits can coerce a WPF slider before its value binding
         // refreshes. Such model-to-view updates must not create another edit.
+        bool previous = refreshing;
         refreshing = true;
         try
         {
@@ -131,7 +134,7 @@ public sealed class NumberParameter(string label, string unit, double min, doubl
             Notify(nameof(Minimum)); Notify(nameof(Maximum)); Notify(nameof(IsEditable));
             Notify(nameof(Value)); Notify(nameof(SliderValue)); Notify(nameof(Text));
         }
-        finally { refreshing = false; }
+        finally { refreshing = previous; }
     }
 }
 

@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:NightmaresSound.App"
-        Title="Retro Sounds Generator 1.2 · Nightmares Studio" Width="1320" Height="880" MinWidth="880" MinHeight="520"
+        Title="Retro Sounds Generator 1.2.1 · Nightmares Studio" Width="1320" Height="880" MinWidth="880" MinHeight="520"
         WindowStartupLocation="CenterScreen" Language="en-US"
         Background="{DynamicResource TextureBrush}" Style="{StaticResource {x:Type Window}}">
     <Window.InputBindings>
@@ -40,7 +40,7 @@
     </Window.Resources>
     <DockPanel Margin="14" Background="Transparent">
         <StackPanel DockPanel.Dock="Top">
-            <TextBlock Text="Retro Sounds Generator 1.2" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,3" />
+            <TextBlock Text="Retro Sounds Generator 1.2.1" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,3" />
             <TextBlock Foreground="{DynamicResource MutedBrush}" Text="NIGHTMARES  /  SOUND STUDIO     ·     Choose · Randomize · Shape · Export WAV" Margin="0,0,0,12" />
             <WrapPanel Margin="0,0,0,4">
                 <Button Content="_Randomize" BorderBrush="{DynamicResource TimbreBrush}" Command="{Binding RandomizeCommand}" FontWeight="Bold" ToolTip="Create a variation in the selected category (Ctrl+R)" />
@@ -108,8 +108,10 @@
                     <TextBlock Text="{Binding ProfileDescription}" TextWrapping="Wrap" Margin="0,0,0,10" />
                     <GroupBox Header="Instruments · Medieval" Visibility="{Binding IsInstrument, Converter={StaticResource BooleanVisibility}}">
                         <StackPanel>
+                            <TextBlock Text="Voice 1 · shared key, scale, mode, and tempo below" TextWrapping="Wrap" FontWeight="SemiBold" Margin="0,0,0,6" />
+                            <CheckBox Content="Enable voice 1" IsChecked="{Binding PrimaryInstrumentVoice.Enabled, ValidatesOnExceptions=True}" />
                             <TextBlock Foreground="{DynamicResource TimbreBrush}" Text="Instrument" />
-                            <ComboBox ItemsSource="{Binding Instruments}" SelectedItem="{Binding SelectedInstrument}" DisplayMemberPath="Name" AutomationProperties.Name="Instrument" Margin="0,4,0,8" />
+                            <ComboBox ItemsSource="{Binding Instruments}" SelectedItem="{Binding PrimaryInstrumentVoice.SelectedInstrument, ValidatesOnExceptions=True}" DisplayMemberPath="Name" AutomationProperties.Name="Instrument" Margin="0,4,0,8" />
                             <TextBlock Foreground="{DynamicResource TimbreBrush}" Text="Sound style" />
                             <ComboBox ItemsSource="{Binding InstrumentStyles}" SelectedItem="{Binding InstrumentStyle, ValidatesOnExceptions=True}" AutomationProperties.Name="Instrument style" Margin="0,4,0,8" />
                             <TextBlock Text="{Binding InstrumentHelp}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,8" />
@@ -131,8 +133,31 @@
                                 <ContentControl Content="{Binding InstrumentTempoParameter}" />
                             </StackPanel>
                             <TextBlock Text="Notes overlap naturally. Duration includes a protected release tail; phrase loops repeat exactly two bars. Preview and export use the same audio." TextWrapping="Wrap" FontSize="12" />
+                            <ItemsControl ItemsSource="{Binding PrimaryInstrumentVoice.Parameters}" />
                         </StackPanel>
                     </GroupBox>
+                    <ItemsControl ItemsSource="{Binding AdditionalInstrumentVoices}" Visibility="{Binding IsInstrument, Converter={StaticResource BooleanVisibility}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <GroupBox Header="{Binding Title}">
+                                    <StackPanel>
+                                        <CheckBox Content="Enable voice" IsChecked="{Binding Enabled, ValidatesOnExceptions=True}" />
+                                        <StackPanel IsEnabled="{Binding Enabled}">
+                                            <TextBlock Foreground="{DynamicResource TimbreBrush}" Text="Instrument" />
+                                            <ComboBox ItemsSource="{Binding Instruments}" SelectedItem="{Binding SelectedInstrument, ValidatesOnExceptions=True}" DisplayMemberPath="Name" AutomationProperties.Name="Additional voice instrument" Margin="0,4,0,8" />
+                                            <TextBlock Foreground="{DynamicResource TimbreBrush}" Text="Sound style" />
+                                            <ComboBox ItemsSource="{Binding Styles}" SelectedItem="{Binding Style, ValidatesOnExceptions=True}" AutomationProperties.Name="Additional voice style" Margin="0,4,0,8" />
+                                            <TextBlock Foreground="{DynamicResource PitchBrush}" Text="Octave" />
+                                            <ComboBox ItemsSource="{Binding Octaves}" SelectedItem="{Binding Octave, ValidatesOnExceptions=True}" IsEnabled="{Binding IsPitched}" AutomationProperties.Name="Additional voice octave" Margin="0,4,0,8" />
+                                            <TextBlock Foreground="{DynamicResource PitchBrush}" Text="Phrase · follows shared mode and tempo" TextWrapping="Wrap" />
+                                            <ComboBox ItemsSource="{Binding Phrases}" SelectedItem="{Binding Phrase, ValidatesOnExceptions=True}" ItemTemplate="{StaticResource InstrumentOption}" IsEnabled="{Binding IsPhrase}" AutomationProperties.Name="Additional voice phrase" Margin="0,4,0,8" />
+                                            <ItemsControl ItemsSource="{Binding Parameters}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </GroupBox>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <GroupBox Header="Simple controls">
                         <ItemsControl ItemsSource="{Binding SimpleParameters}" />
                     </GroupBox>

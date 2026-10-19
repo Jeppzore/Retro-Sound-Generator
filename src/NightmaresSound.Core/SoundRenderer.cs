@@ -15,14 +15,18 @@ public sealed record RenderedSound(byte[] Pcm16, int SampleRate, int Channels, d
 public sealed class SoundRenderer
 {
     public RenderedSound Render(SoundRecipe recipe, CancellationToken cancellationToken = default)
+        => TryRender(recipe, cancellationToken) ?? throw new OperationCanceledException(cancellationToken);
+
+    /// <summary>Returns null on cancellation without throwing or publishing partial audio.</summary>
+    public RenderedSound? TryRender(SoundRecipe recipe, CancellationToken cancellationToken = default)
     {
         RecipeValidator.Validate(recipe);
-        cancellationToken.ThrowIfCancellationRequested();
+        if (cancellationToken.IsCancellationRequested) return null;
         int rate = recipe.SampleRate, channels = recipe.Channels;
         int frames = (int)Math.Round((recipe.Instrument is null || recipe.Loop ? recipe.DurationSeconds
             : Math.Max(recipe.DurationSeconds, InstrumentCatalog.RequiredDuration(recipe.Instrument))) * rate);
         var mix = new double[frames * channels];
-        if (recipe.Instrument is not null) InstrumentRenderer.Mix(mix, recipe, cancellationToken);
+        if (recipe.Instrument is not null && !InstrumentRenderer.Mix(mix, recipe, cancellationToken)) return null;
         for (int layerIndex = 0; recipe.Instrument is null && layerIndex < recipe.Layers.Length; layerIndex++)
         {
             var layer = recipe.Layers[layerIndex];
@@ -37,7 +41,7 @@ public sealed class SoundRenderer
             double tremoloRate = PeriodicRate(recipe.Effects.TremoloHz, recipe);
             for (int frame = start; frame < frames; frame++)
             {
-                if ((frame & 2047) == 0) cancellationToken.ThrowIfCancellationRequested();
+                if ((frame & 2047) == 0 && cancellationToken.IsCancellationRequested) return null;
                 double time = (double)(frame - start) / rate;
                 int note = 0;
                 double noteTime = time, noteDuration = available;
@@ -82,16 +86,16 @@ public sealed class SoundRenderer
                 if (channels == 2) mix[frame * 2 + 1] += value * right;
             }
         }
-        Filter(mix, recipe, cancellationToken);
-        Shape(mix, recipe.Effects, cancellationToken);
-        Delay(mix, recipe, cancellationToken);
+        if (!Filter(mix, recipe, cancellationToken)
+            || !Shape(mix, recipe.Effects, cancellationToken)
+            || !Delay(mix, recipe, cancellationToken)) return null;
         if (recipe.Loop) BlendLoopBoundary(mix, frames, channels, rate);
         else FadeEdges(mix, frames, channels, rate);
 
         double rawPeak = 0;
         for (int i = 0; i < mix.Length; i++)
         {
-            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+            if ((i & 4095) == 0 && cancellationToken.IsCancellationRequested) return null;
             rawPeak = Math.Max(rawPeak, Math.Abs(mix[i]));
         }
         // Normalize first; the user's output level remains an audible final gain control.
@@ -102,13 +106,13 @@ public sealed class SoundRenderer
         double finalPeak = 0;
         for (int i = 0; i < mix.Length; i++)
         {
-            if ((i & 4095) == 0) cancellationToken.ThrowIfCancellationRequested();
+            if ((i & 4095) == 0 && cancellationToken.IsCancellationRequested) return null;
             var value = Math.Clamp(mix[i] * gain, -1, 1);
             short sample = (short)Math.Round(value * 32767);
             finalPeak = Math.Max(finalPeak, Math.Abs(sample / 32768.0));
             System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(pcm.AsSpan(i * 2, 2), sample);
         }
-        return new(pcm, rate, channels, Db(finalPeak), Db(preLimitPeak), preLimitPeak > 1);
+        return cancellationToken.IsCancellationRequested ? null : new(pcm, rate, channels, Db(finalPeak), Db(preLimitPeak), preLimitPeak > 1);
     }
 
     private static double Db(double amplitude) => amplitude > 0 ? 20 * Math.Log10(amplitude) : double.NegativeInfinity;
@@ -150,7 +154,7 @@ public sealed class SoundRenderer
         return release > 0 ? BeforeRelease(gate) * Math.Max(0, 1 - (time - gate) / release) : 0;
     }
 
-    private static void Filter(double[] samples, SoundRecipe r, CancellationToken token)
+    private static bool Filter(double[] samples, SoundRecipe r, CancellationToken token)
     {
         double lowAlpha = 1 - Math.Exp(-2 * Math.PI * Math.Min(r.Effects.LowPassHz, r.SampleRate * .45) / r.SampleRate);
         double highAlpha = 1 - Math.Exp(-2 * Math.PI * r.Effects.HighPassHz / r.SampleRate);
@@ -160,7 +164,7 @@ public sealed class SoundRenderer
         {
             for (int i = 0; i < samples.Length; i++)
             {
-                if ((i & 4095) == 0) token.ThrowIfCancellationRequested();
+                if ((i & 4095) == 0 && token.IsCancellationRequested) return false;
                 int c = i % r.Channels;
                 low[c] += lowAlpha * (samples[i] - low[c]);
                 dc[c] += highAlpha * (low[c] - dc[c]);
@@ -168,30 +172,32 @@ public sealed class SoundRenderer
         }
         for (int i = 0; i < samples.Length; i++)
         {
-            if ((i & 4095) == 0) token.ThrowIfCancellationRequested();
+            if ((i & 4095) == 0 && token.IsCancellationRequested) return false;
             int c = i % r.Channels;
             low[c] += lowAlpha * (samples[i] - low[c]);
             dc[c] += highAlpha * (low[c] - dc[c]);
             samples[i] = low[c] - dc[c];
         }
+        return !token.IsCancellationRequested;
     }
 
-    private static void Shape(double[] samples, EffectSettings e, CancellationToken token)
+    private static bool Shape(double[] samples, EffectSettings e, CancellationToken token)
     {
         double drive = 1 + e.Saturation * 12;
         double divisor = Math.Tanh(drive);
         double steps = Math.Pow(2, e.BitDepth - 1) - 1;
         for (int i = 0; i < samples.Length; i++)
         {
-            if ((i & 4095) == 0) token.ThrowIfCancellationRequested();
+            if ((i & 4095) == 0 && token.IsCancellationRequested) return false;
             double value = e.Saturation > 0 ? Math.Tanh(samples[i] * drive) / divisor : samples[i];
             samples[i] = e.BitDepth < 16 ? Math.Round(value * steps) / steps : value;
         }
+        return !token.IsCancellationRequested;
     }
 
-    private static void Delay(double[] samples, SoundRecipe r, CancellationToken token)
+    private static bool Delay(double[] samples, SoundRecipe r, CancellationToken token)
     {
-        if (r.Effects.DelayMix == 0) return;
+        if (r.Effects.DelayMix == 0) return !token.IsCancellationRequested;
         int offset = Math.Max(1, (int)Math.Round(r.Effects.DelaySeconds * r.SampleRate)) * r.Channels;
         double wet = r.Effects.DelayMix, feedback = r.Effects.DelayFeedback;
         if (r.Loop)
@@ -205,7 +211,7 @@ public sealed class SoundRenderer
                 int read = (int)((samples.Length - (long)shift * tap % samples.Length) % samples.Length);
                 for (int i = 0; i < samples.Length; i++)
                 {
-                    if ((i & 4095) == 0) token.ThrowIfCancellationRequested();
+                    if ((i & 4095) == 0 && token.IsCancellationRequested) return false;
                     samples[i] += dry[read] * amplitude;
                     if (++read == samples.Length) read = 0;
                 }
@@ -217,11 +223,12 @@ public sealed class SoundRenderer
             var echoes = new double[samples.Length];
             for (int i = 0; i < samples.Length; i++)
             {
-                if ((i & 4095) == 0) token.ThrowIfCancellationRequested();
+                if ((i & 4095) == 0 && token.IsCancellationRequested) return false;
                 if (i >= offset) echoes[i] = samples[i - offset] + echoes[i - offset] * feedback;
             }
             for (int i = 0; i < samples.Length; i++) samples[i] = samples[i] * (1 - wet) + echoes[i] * wet;
         }
+        return !token.IsCancellationRequested;
     }
 
     private static void FadeEdges(double[] samples, int frames, int channels, int rate)

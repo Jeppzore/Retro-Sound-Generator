@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace NightmaresSound.Core;
 
 public enum InstrumentStyle { Retro, Acoustic }
@@ -5,16 +7,31 @@ public enum InstrumentMode { SingleNote, Phrase }
 public enum MusicalScale { Major, NaturalMinor, Dorian, Mixolydian }
 public enum InstrumentPhrase { Ascending, Descending, Strum, Melody, March, Dance }
 
-public sealed record InstrumentSettings
+public sealed record InstrumentVoiceSettings
 {
+    public bool Enabled { get; init; } = true;
     public string Id { get; init; } = "guitar";
     public InstrumentStyle Style { get; init; }
-    public InstrumentMode Mode { get; init; }
     public InstrumentPhrase Phrase { get; init; } = InstrumentPhrase.Ascending;
+    public int Octave { get; init; } = 4;
+    public double TuningSemitones { get; init; }
+    public double Level { get; init; } = 1;
+    public double Pan { get; init; }
+}
+
+public sealed record InstrumentSettings
+{
+    [JsonRequired] public InstrumentVoiceSettings[] Voices { get; init; } = [new()];
+    public InstrumentMode Mode { get; init; }
     public int Key { get; init; } = 2;
     public MusicalScale Scale { get; init; } = MusicalScale.Dorian;
-    public int Octave { get; init; } = 4;
     public int Tempo { get; init; } = 90;
+
+    // Source-compatible access to the first voice; schema 2 persists only Voices.
+    [JsonIgnore] public string Id { get => Voices[0].Id; init => Voices = [Voices[0] with { Id = value }, .. Voices.Skip(1)]; }
+    [JsonIgnore] public InstrumentStyle Style { get => Voices[0].Style; init => Voices = [Voices[0] with { Style = value }, .. Voices.Skip(1)]; }
+    [JsonIgnore] public InstrumentPhrase Phrase { get => Voices[0].Phrase; init => Voices = [Voices[0] with { Phrase = value }, .. Voices.Skip(1)]; }
+    [JsonIgnore] public int Octave { get => Voices[0].Octave; init => Voices = [Voices[0] with { Octave = value }, .. Voices.Skip(1)]; }
 }
 
 public sealed record InstrumentDefinition(string Id, string Name, string Description, double ReleaseSeconds)
@@ -53,13 +70,32 @@ public static class InstrumentCatalog
     }
     public static void Validate(InstrumentSettings settings)
     {
-        var instrument = Get(settings.Id);
-        if (!Enum.IsDefined(settings.Style) || !Enum.IsDefined(settings.Mode) || !Enum.IsDefined(settings.Scale)
-            || !instrument.Phrases.Contains(settings.Phrase)) throw new InvalidDataException("Unsupported instrument style, mode, scale, or phrase.");
-        if (settings.Key is < 0 or > 11 || settings.Octave is < 3 or > 5 || settings.Tempo is < 40 or > 200)
+        if (settings.Voices is null || settings.Voices.Length is < 1 or > 3 || settings.Voices.Any(v => v is null))
+            throw new InvalidDataException("Instruments need 1–3 valid voices.");
+        if (!Enum.IsDefined(settings.Mode) || !Enum.IsDefined(settings.Scale))
+            throw new InvalidDataException("Unsupported instrument mode or scale.");
+        if (settings.Key is < 0 or > 11 || settings.Tempo is < 40 or > 200)
             throw new InvalidDataException("Choose a key, octave 3–5, and tempo 40–200 BPM.");
-        if (settings.Style == InstrumentStyle.Acoustic && !instrument.HasAcoustic)
-            throw new InvalidDataException("This instrument has no bundled acoustic recordings. Choose Retro.");
+        foreach (var voice in settings.Voices)
+        {
+            var instrument = Get(voice.Id);
+            if (!Enum.IsDefined(voice.Style) || !instrument.Phrases.Contains(voice.Phrase))
+                throw new InvalidDataException("Unsupported instrument style or phrase.");
+            if (voice.Octave is < 3 or > 5 || !double.IsFinite(voice.TuningSemitones) || Math.Abs(voice.TuningSemitones) > 36
+                || !double.IsFinite(voice.Level) || voice.Level is < 0 or > 1 || !double.IsFinite(voice.Pan) || Math.Abs(voice.Pan) > 1)
+                throw new InvalidDataException("Choose octave 3–5, tuning −36 to 36, level 0–1, and pan −1 to 1.");
+            if (voice.Style == InstrumentStyle.Acoustic && !instrument.HasAcoustic)
+                throw new InvalidDataException("This instrument has no bundled acoustic recordings. Choose Retro.");
+        }
+    }
+    public static InstrumentSettings ForVoice(InstrumentSettings settings, InstrumentVoiceSettings voice) => settings with { Voices = [voice] };
+
+    public static (double Minimum, double Maximum) AcousticPitchBounds(InstrumentSettings settings, InstrumentVoiceSettings voice)
+    {
+        var zones = AcousticLibrary.Zones.Where(z => z.InstrumentId == voice.Id).ToArray();
+        var notes = Notes(ForVoice(settings, voice));
+        return (zones.Min(z => Math.Max(z.MinMidi, z.RootMidi - 4)) - notes.Min(n => n.MidiNote),
+            zones.Max(z => Math.Min(z.MaxMidi, z.RootMidi + 4)) - notes.Max(n => n.MidiNote));
     }
     public static IReadOnlyList<InstrumentNote> Notes(InstrumentSettings s)
     {
@@ -101,8 +137,11 @@ public static class InstrumentCatalog
     }
     public static double RequiredDuration(InstrumentSettings settings)
     {
-        var notes = Notes(settings);
-        return Math.Max(settings.Mode == InstrumentMode.Phrase ? 8 * 60.0 / settings.Tempo : 0,
-            notes.Max(n => n.StartSeconds + n.GateSeconds + Get(settings.Id).ReleaseSeconds));
+        return settings.Voices.Where(v => v.Enabled).Select(v =>
+        {
+            var notes = Notes(ForVoice(settings, v));
+            return Math.Max(settings.Mode == InstrumentMode.Phrase ? 8 * 60.0 / settings.Tempo : 0,
+                notes.Max(n => n.StartSeconds + n.GateSeconds + Get(v.Id).ReleaseSeconds));
+        }).DefaultIfEmpty(.03).Max();
     }
 }

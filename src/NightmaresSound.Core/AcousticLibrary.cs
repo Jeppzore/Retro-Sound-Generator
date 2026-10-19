@@ -26,11 +26,18 @@ public static class AcousticLibrary
 
     public static AcousticZone Select(string instrumentId, double midi)
     {
-        var zone = Zones.Where(z => z.InstrumentId == instrumentId && midi >= z.MinMidi && midi <= z.MaxMidi)
-            .OrderBy(z => Math.Abs(z.RootMidi - midi)).FirstOrDefault();
-        if (zone is null || Math.Abs(zone.RootMidi - midi) > 4)
+        if (!TrySelect(instrumentId, midi, out var zone))
             throw new InvalidDataException("This acoustic note is outside the bundled sample range. Adjust key, octave, or pitch, or choose Retro.");
-        return zone;
+        return zone!;
+    }
+
+    public static bool TrySelect(string instrumentId, double midi, out AcousticZone? zone)
+    {
+        zone = Zones.Where(z => z.InstrumentId == instrumentId && midi >= z.MinMidi && midi <= z.MaxMidi)
+            .OrderBy(z => Math.Abs(z.RootMidi - midi)).FirstOrDefault();
+        if (zone is not null && Math.Abs(zone.RootMidi - midi) <= 4) return true;
+        zone = null;
+        return false;
     }
 
     internal static AcousticAudio Load(AcousticZone zone) => Cache.GetOrAdd(zone.File,

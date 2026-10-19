@@ -4,13 +4,16 @@ namespace NightmaresSound.Core;
 public sealed class RenderCoordinator : IDisposable
 {
     private readonly object sync = new();
-    private readonly Func<SoundRecipe, CancellationToken, RenderedSound> render;
+    private readonly Func<SoundRecipe, CancellationToken, RenderedSound?> render;
     private CancellationTokenSource? pending;
     private bool disposed;
     private int revision;
 
     public RenderCoordinator(Func<SoundRecipe, CancellationToken, RenderedSound>? render = null)
-        => this.render = render ?? new SoundRenderer().Render;
+    {
+        if (render is null) this.render = new SoundRenderer().TryRender;
+        else this.render = render;
+    }
 
     public async Task<RenderedSound?> UpdateAsync(SoundRecipe recipe, int debounceMilliseconds = 180)
     {
@@ -25,11 +28,20 @@ public sealed class RenderCoordinator : IDisposable
         }
         try
         {
-            await Task.Delay(debounceMilliseconds, source.Token).ConfigureAwait(false);
-            var result = await Task.Run(() => render(recipe, source.Token), source.Token).ConfigureAwait(false);
+            // Wake the debounce through a result rather than awaiting a cancelled task.
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var registration = source.Token.Register(() => cancelled.TrySetResult());
+            await Task.WhenAny(Task.Delay(debounceMilliseconds), cancelled.Task).ConfigureAwait(false);
+            if (source.IsCancellationRequested) return null;
+            var result = await Task.Run(() =>
+            {
+                if (source.IsCancellationRequested) return null;
+                // Injected renderers may still use the throwing cancellation API.
+                try { return render(recipe, source.Token); }
+                catch (OperationCanceledException) when (source.IsCancellationRequested) { return null; }
+            }).ConfigureAwait(false);
             lock (sync) return version == revision && !disposed ? result : null;
         }
-        catch (OperationCanceledException) when (source.IsCancellationRequested) { return null; }
         finally
         {
             lock (sync)

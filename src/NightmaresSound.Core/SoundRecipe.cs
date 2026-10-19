@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 
 namespace NightmaresSound.Core;
 
@@ -40,7 +41,7 @@ public sealed record EffectSettings
 
 public sealed record SoundRecipe
 {
-    [JsonRequired] public int Version { get; init; } = 1;
+    [JsonRequired] public int Version { get; init; } = 2;
     [JsonRequired] public string CategoryId { get; init; } = "";
     [JsonRequired] public string ConfigurationId { get; init; } = "";
     public string Name { get; init; } = "Untitled";
@@ -71,7 +72,7 @@ public static class RecipeFile
     public static string Serialize(SoundRecipe recipe)
     {
         RecipeValidator.Validate(recipe);
-        return JsonSerializer.Serialize(recipe, Options);
+        return JsonSerializer.Serialize(recipe with { Version = 2 }, Options);
     }
 
     public static SoundRecipe Deserialize(string json)
@@ -79,7 +80,20 @@ public static class RecipeFile
         if (json.Length > 256 * 1024) throw new InvalidDataException("Recipe is too large (maximum 256 KB).");
         try
         {
-            var recipe = JsonSerializer.Deserialize<SoundRecipe>(json, Options)
+            var node = JsonNode.Parse(json) ?? throw new InvalidDataException("The recipe is empty.");
+            if (node is JsonObject root && root["Version"] is JsonValue version && version.TryGetValue<int>(out int number) && number == 1)
+            {
+                if (root["Instrument"] is JsonObject instrument)
+                {
+                    if (instrument.ContainsKey("Voices")) throw new InvalidDataException("Version 1 does not support instrument voices.");
+                    var voice = new JsonObject();
+                    foreach (string key in new[] { "Id", "Style", "Phrase", "Octave" })
+                        if (instrument.Remove(key, out var value)) voice[key] = value;
+                    instrument["Voices"] = new JsonArray(voice);
+                }
+                root["Version"] = 2;
+            }
+            var recipe = node.Deserialize<SoundRecipe>(Options)
                 ?? throw new InvalidDataException("The recipe is empty.");
             RecipeValidator.Validate(recipe);
             return recipe;
@@ -90,10 +104,29 @@ public static class RecipeFile
 
 public static class RecipeValidator
 {
+    /// <summary>Checks the acoustic coverage of structurally valid instrument settings without throwing.</summary>
+    public static string? AcousticRangeError(SoundRecipe recipe)
+    {
+        if (recipe.Instrument is null || recipe.Effects is null) return null;
+        for (int slot = 0; slot < recipe.Instrument.Voices.Length; slot++)
+        {
+            var voice = recipe.Instrument.Voices[slot];
+            if (!voice.Enabled || voice.Style != InstrumentStyle.Acoustic) continue;
+            foreach (var note in InstrumentCatalog.Notes(InstrumentCatalog.ForVoice(recipe.Instrument, voice)))
+            {
+                double pitch = note.MidiNote + recipe.PitchSemitones + voice.TuningSemitones;
+                if (!AcousticLibrary.TrySelect(voice.Id, pitch - recipe.Effects.VibratoSemitones, out _)
+                    || !AcousticLibrary.TrySelect(voice.Id, pitch + recipe.Effects.VibratoSemitones, out _))
+                    return $"Voice {slot + 1} ({InstrumentCatalog.Get(voice.Id).Name}): this acoustic note is outside the bundled sample range. Adjust key, octave, tuning, pitch, or vibrato, or choose Retro.";
+            }
+        }
+        return null;
+    }
+
     public static void Validate(SoundRecipe r)
     {
         ArgumentNullException.ThrowIfNull(r);
-        if (r.Version != 1) throw new InvalidDataException($"Recipe version {r.Version} is not supported.");
+        if (r.Version != 2) throw new InvalidDataException($"Recipe version {r.Version} is not supported.");
         var profile = SoundCatalog.Profiles.FirstOrDefault(p => p.Id == r.ConfigurationId);
         if (profile is null || profile.CategoryId != r.CategoryId)
             throw new InvalidDataException("The recipe category or starting configuration is unknown.");
@@ -109,12 +142,7 @@ public static class RecipeValidator
             if (r.Effects is null) throw new InvalidDataException("Effects settings are missing.");
             if (r.CategoryId != "instruments" || r.ConfigurationId != "instrument-" + r.Instrument.Id)
                 throw new InvalidDataException("The instrument must match its starting configuration.");
-            if (r.Instrument.Style == InstrumentStyle.Acoustic)
-                foreach (var note in InstrumentCatalog.Notes(r.Instrument))
-                {
-                    AcousticLibrary.Select(r.Instrument.Id, note.MidiNote + r.PitchSemitones - r.Effects.VibratoSemitones);
-                    AcousticLibrary.Select(r.Instrument.Id, note.MidiNote + r.PitchSemitones + r.Effects.VibratoSemitones);
-                }
+            if (AcousticRangeError(r) is { } rangeError) throw new InvalidDataException(rangeError);
         }
         else if (r.CategoryId == "instruments") throw new InvalidDataException("Instrument settings are missing.");
         if (r.SampleRate is not (44100 or 48000) || r.Channels is not (1 or 2))

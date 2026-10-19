@@ -22,7 +22,8 @@ public static class SoundCatalog
     public static SoundRecipe Create(string id)
     {
         var recipe = Profiles.First(p => p.Id == id).Default;
-        return recipe with { Layers = recipe.Layers.Select(l => l with { Notes = [.. l.Notes] }).ToArray() };
+        return recipe with { Layers = recipe.Layers.Select(l => l with { Notes = [.. l.Notes] }).ToArray(),
+            Instrument = recipe.Instrument is null ? null : recipe.Instrument with { Voices = [.. recipe.Instrument.Voices] } };
     }
 
     private static IReadOnlyList<SoundProfile> BuildProfiles()

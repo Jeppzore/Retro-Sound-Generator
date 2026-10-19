@@ -20,7 +20,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private SoundProfile profile = SoundCatalog.Profiles[0];
     private string search = "", status = "Preparing waveform…", error = "";
     private string? exportFolder;
-    private bool rendering, playing, disposed;
+    private bool rendering, playing;
+    private volatile bool disposed;
     private int revision;
     private RenderedSound? sound;
     private readonly string settingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NightmaresSound", "settings.json");
@@ -31,11 +32,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<NumberParameter> SimpleParameters { get; }
     public IReadOnlyList<ParameterGroup> EffectGroups { get; }
     public IReadOnlyList<LayerEditorViewModel> Layers { get; }
+    public IReadOnlyList<InstrumentVoiceViewModel> InstrumentVoices { get; }
+    public InstrumentVoiceViewModel PrimaryInstrumentVoice => InstrumentVoices[0];
+    public IEnumerable<InstrumentVoiceViewModel> AdditionalInstrumentVoices => InstrumentVoices.Skip(1);
+    internal bool IsRefreshingEditors { get; private set; }
     public NumberParameter InstrumentTempoParameter { get; }
     public IReadOnlyList<InstrumentDefinition> Instruments => InstrumentCatalog.All;
     public bool IsInstrument => Current.Instrument is not null;
     public bool IsSynthesis => !IsInstrument;
-    public bool IsPitchedInstrument => IsInstrument && !SelectedInstrument.IsDrum;
+    public bool IsPitchedInstrument => Current.Instrument?.Voices.Any(v => v.Enabled && !InstrumentCatalog.Get(v.Id).IsDrum) == true;
     public bool IsInstrumentPhrase => Current.Instrument?.Mode == InstrumentMode.Phrase;
     public InstrumentDefinition SelectedInstrument
     {
@@ -71,13 +76,30 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     };
     private void ChangeInstrument(Func<InstrumentSettings, InstrumentSettings> change)
     {
-        if (Current.Instrument is null) return;
+        if (Current.Instrument is null || IsRefreshingEditors) return;
         var settings = change(Current.Instrument);
         if (settings == Current.Instrument) return;
         EndGesture();
         var next = Current with { Instrument = settings, DurationSeconds = InstrumentCatalog.RequiredDuration(settings) };
+        if (RejectAcousticEdit(next)) return;
         try { Apply(next); }
         catch (InvalidDataException ex) { throw new ArgumentException(ex.Message, ex); }
+    }
+
+    private bool RejectAcousticEdit(SoundRecipe next)
+    {
+        if (RecipeValidator.AcousticRangeError(next) is not { } message) return false;
+        ShowErrorMessage(message);
+        RefreshEditors();
+        // WPF can defer a source-to-target update while a ComboBox setter runs.
+        // Repeat the refresh after the rejected source update finishes.
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.HasShutdownStarted)
+            dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.DataBind, new Action(() =>
+            {
+                if (!disposed) RefreshEditors();
+            }));
+        return true;
     }
     public int[] SampleRates { get; } = [44100, 48000];
     public int[] ChannelCounts { get; } = [1, 2];
@@ -141,13 +163,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         NumberParameter P(string name, SoundConcept concept, string unit, double min, double max, double step, string help,
             Func<SoundRecipe, double> read, Func<SoundRecipe, double, SoundRecipe> write,
             Func<(double Minimum, double Maximum)>? bounds = null) =>
-            new(name, unit, min, max, step, help, () => read(Current), v => Apply(write(Current, v)), bounds, concept);
+            new(name, unit, min, max, step, help, () => read(Current), v => Apply(write(Current, v)), bounds, concept, () => IsRefreshingEditors);
         NumberParameter E(string name, SoundConcept concept, string unit, double min, double max, double step, string help,
             Func<EffectSettings, double> read, Func<EffectSettings, double, EffectSettings> write,
             Func<(double Minimum, double Maximum)>? bounds = null) =>
             P(name, concept, unit, min, max, step, help, r => read(r.Effects), (r,v) => r with { Effects = write(r.Effects, v) }, bounds);
         InstrumentTempoParameter = new("Tempo", "BPM", 40, 200, 1, "Phrase tempo, from 40 to 200 beats per minute.",
-            () => InstrumentTempo, v => InstrumentTempo = (int)Math.Round(v), concept: SoundConcept.Timing);
+            () => InstrumentTempo, v => InstrumentTempo = (int)Math.Round(v), concept: SoundConcept.Timing, isRefreshing: () => IsRefreshingEditors);
         SimpleParameters = new NumberParameter[]
         {
             P("Duration", SoundConcept.Timing, "s", .03, 30, .01, "Total file length. Instruments reserve their release tail; phrase loops have a fixed two-bar length.", r => r.DurationSeconds, (r,v) => r with { DurationSeconds = v }, DurationBounds),
@@ -177,19 +199,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             })
         };
         Layers = Enumerable.Range(0, 3).Select(i => new LayerEditorViewModel(this, i)).ToArray();
+        InstrumentVoices = Enumerable.Range(0, 3).Select(i => new InstrumentVoiceViewModel(this, i)).ToArray();
         RandomizeCommand = new UiCommand(() => Handle(() =>
         {
             EndGesture();
             Apply(RecipeRandomizer.Randomize(Current, RandomNumberGenerator.GetInt32(int.MaxValue)));
         }));
-        PlayCommand = new UiCommand(Play, () => sound is not null && !rendering);
-        StopCommand = new UiCommand(() => { StopAudio(); SetStatus("Playback stopped."); }, () => playing);
+        PlayCommand = new UiCommand(Play, () => !disposed && sound is not null && !rendering);
+        StopCommand = new UiCommand(() => { StopAudio(); SetStatus("Playback stopped."); }, () => !disposed && playing);
         UndoCommand = new UiCommand(() => { EndGesture(); Apply(history.Undo(Current), recordHistory: false); }, () => history.CanUndo);
         RedoCommand = new UiCommand(() => { EndGesture(); Apply(history.Redo(Current), recordHistory: false); }, () => history.CanRedo);
         SaveRecipeCommand = new UiCommand(() => Handle(SaveRecipe));
         OpenRecipeCommand = new UiCommand(() => Handle(OpenRecipe));
-        ExportCommand = new AsyncUiCommand(ExportAsync, ShowError, () => sound is not null && !rendering);
-        audio.Stopped += message => Application.Current.Dispatcher.BeginInvoke(() =>
+        ExportCommand = new AsyncUiCommand(ExportAsync, ShowError, () => !disposed && sound is not null && !rendering);
+        audio.Stopped += OnAudioStopped;
+        ReadSettings();
+        FilterProfiles();
+    }
+
+    private void OnAudioStopped(string? message)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (disposed || dispatcher is null || dispatcher.HasShutdownStarted || dispatcher.HasShutdownFinished) return;
+        dispatcher.BeginInvoke(() =>
         {
             if (disposed) return;
             playing = false; Notify(nameof(IsPlaying)); Notify(nameof(PlaybackLabel));
@@ -197,8 +229,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             else SetStatus("Playback finished.");
             CommandManager.InvalidateRequerySuggested();
         });
-        ReadSettings();
-        FilterProfiles();
     }
 
     public Task InitializeAsync() => RenderAsync();
@@ -215,20 +245,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private (double Minimum, double Maximum) AcousticPitchBounds()
     {
         var settings = Current.Instrument!;
-        var zones = AcousticLibrary.Zones.Where(z => z.InstrumentId == settings.Id).ToArray();
-        var notes = InstrumentCatalog.Notes(settings);
-        return (zones.Min(z => Math.Max(z.MinMidi, z.RootMidi - 4)) - notes.Min(n => n.MidiNote),
-            zones.Max(z => Math.Min(z.MaxMidi, z.RootMidi + 4)) - notes.Max(n => n.MidiNote));
+        var bounds = settings.Voices.Where(v => v.Enabled && v.Style == InstrumentStyle.Acoustic)
+            .Select(v => { var b = InstrumentCatalog.AcousticPitchBounds(settings, v);
+                return (Minimum: b.Minimum - v.TuningSemitones, Maximum: b.Maximum - v.TuningSemitones); }).ToArray();
+        return (bounds.Select(b => b.Minimum).DefaultIfEmpty(-38).Max(), bounds.Select(b => b.Maximum).DefaultIfEmpty(38).Min());
     }
     private (double Minimum, double Maximum) PitchBounds()
     {
-        if (Current.Instrument?.Style != InstrumentStyle.Acoustic) return (-36, 36);
+        if (Current.Instrument is null) return (-36, 36);
         var (minimum, maximum) = AcousticPitchBounds();
         return (Math.Max(-36, minimum + Current.Effects.VibratoSemitones), Math.Min(36, maximum - Current.Effects.VibratoSemitones));
     }
     private (double Minimum, double Maximum) VibratoBounds()
     {
-        if (Current.Instrument?.Style != InstrumentStyle.Acoustic) return (0, 2);
+        if (Current.Instrument is null) return (0, 2);
         var (minimum, maximum) = AcousticPitchBounds();
         return (0, Math.Max(0, Math.Min(2, Math.Min(Current.PitchSemitones - minimum, maximum - Current.PitchSemitones))));
     }
@@ -248,6 +278,31 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Apply(Current with { Layers = layers });
     }
 
+    internal void UpdateInstrumentVoice(int index, Func<InstrumentVoiceSettings, InstrumentVoiceSettings> change)
+    {
+        if (Current.Instrument is null || IsRefreshingEditors) return;
+        Apply(WithInstrumentVoice(index, change));
+    }
+
+    internal void ChangeInstrumentVoice(int index, Func<InstrumentVoiceSettings, InstrumentVoiceSettings> change)
+    {
+        if (Current.Instrument is null || IsRefreshingEditors) return;
+        EndGesture();
+        var next = WithInstrumentVoice(index, change);
+        if (RejectAcousticEdit(next)) return;
+        try { Apply(next); }
+        catch (InvalidDataException ex) { throw new ArgumentException(ex.Message, ex); }
+    }
+
+    private SoundRecipe WithInstrumentVoice(int index, Func<InstrumentVoiceSettings, InstrumentVoiceSettings> change)
+    {
+        var instrument = Current.Instrument!;
+        var voices = Enumerable.Range(0, 3).Select(i => instrument.Voices.ElementAtOrDefault(i)
+            ?? new InstrumentVoiceSettings { Id = instrument.Id, Phrase = instrument.Phrase, Enabled = false }).ToArray();
+        voices[index] = change(voices[index]);
+        return Current with { Instrument = instrument with { Voices = voices }, ConfigurationId = "instrument-" + voices[0].Id };
+    }
+
     private void LoadProfile(SoundProfile value) => Apply(SoundCatalog.Create(value.Id) with
     {
         SampleRate = Current.SampleRate, Channels = Current.Channels,
@@ -256,6 +311,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void Apply(SoundRecipe next, bool recordHistory = true)
     {
+        if (disposed) return;
         if (next.Instrument is not null && !next.Loop)
             next = next with { DurationSeconds = Math.Max(next.DurationSeconds, InstrumentCatalog.RequiredDuration(next.Instrument)) };
         if (next.Instrument?.Mode == InstrumentMode.Phrase && next.Loop)
@@ -272,15 +328,21 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void RefreshEditors()
     {
-        foreach (var property in new[] { nameof(SelectedCategory), nameof(SelectedProfile), nameof(ProfileDescription), nameof(RecipeName), nameof(Seed), nameof(Loop), nameof(Normalize), nameof(SampleRate), nameof(Channels) }) Notify(property);
-        foreach (var property in new[] { nameof(IsInstrument), nameof(IsSynthesis), nameof(IsPitchedInstrument), nameof(IsInstrumentPhrase),
-            nameof(SelectedInstrument), nameof(InstrumentStyles), nameof(InstrumentPhrases), nameof(InstrumentStyle), nameof(InstrumentMode),
-            nameof(InstrumentPhrase), nameof(InstrumentScale), nameof(InstrumentKey), nameof(InstrumentOctave), nameof(InstrumentTempo), nameof(InstrumentHelp) }) Notify(property);
-        foreach (var p in SimpleParameters.Concat(EffectGroups.SelectMany(g => g.Parameters))) p.Refresh();
-        InstrumentTempoParameter.Refresh();
-        foreach (var l in Layers) l.Refresh();
-        FilterProfiles();
-        CommandManager.InvalidateRequerySuggested();
+        IsRefreshingEditors = true;
+        try
+        {
+            foreach (var property in new[] { nameof(SelectedCategory), nameof(SelectedProfile), nameof(ProfileDescription), nameof(RecipeName), nameof(Seed), nameof(Loop), nameof(Normalize), nameof(SampleRate), nameof(Channels) }) Notify(property);
+            foreach (var property in new[] { nameof(IsInstrument), nameof(IsSynthesis), nameof(IsPitchedInstrument), nameof(IsInstrumentPhrase),
+                nameof(SelectedInstrument), nameof(InstrumentStyles), nameof(InstrumentPhrases), nameof(InstrumentStyle), nameof(InstrumentMode),
+                nameof(InstrumentPhrase), nameof(InstrumentScale), nameof(InstrumentKey), nameof(InstrumentOctave), nameof(InstrumentTempo), nameof(InstrumentHelp) }) Notify(property);
+            foreach (var p in SimpleParameters.Concat(EffectGroups.SelectMany(g => g.Parameters))) p.Refresh();
+            InstrumentTempoParameter.Refresh();
+            foreach (var l in Layers) l.Refresh();
+            foreach (var voice in InstrumentVoices) voice.Refresh();
+            FilterProfiles();
+            CommandManager.InvalidateRequerySuggested();
+        }
+        finally { IsRefreshingEditors = false; }
     }
 
     private void FilterProfiles()
@@ -407,8 +469,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         try { action(); }
         catch (Exception ex) { ShowError(new InvalidOperationException(prefix + ex.Message, ex)); }
     }
-    private void ShowError(Exception ex) { error = ex.Message; Notify(nameof(ErrorMessage)); SetStatus("Action could not be completed. See the message above."); }
+    private void ShowError(Exception ex) => ShowErrorMessage(ex.Message);
+    private void ShowErrorMessage(string message) { error = message; Notify(nameof(ErrorMessage)); SetStatus("Action could not be completed. See the message above."); }
     private void SetStatus(string value) { status = value; Notify(nameof(Status)); }
-    public void Dispose() { disposed = true; renderer.Dispose(); StopAudio(); audio.Dispose(); }
+    public void Dispose()
+    {
+        if (disposed) return;
+        EndGesture();
+        disposed = true;
+        audio.Stopped -= OnAudioStopped;
+        renderer.Dispose();
+        StopAudio();
+        try { audio.Dispose(); }
+        catch (Exception ex) { ShowError(ex); }
+        rendering = false;
+        sound = null;
+        CommandManager.InvalidateRequerySuggested();
+    }
     private sealed record UserSettings(string? ExportFolder);
 }
